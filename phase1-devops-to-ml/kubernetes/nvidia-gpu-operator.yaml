@@ -1,0 +1,71 @@
+# NVIDIA GPU Operator Installation
+# This operator manages GPU drivers, container runtime, and device plugins
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-operator
+---
+# Add NVIDIA Helm repository and install GPU Operator
+# Run these commands after cluster creation:
+#
+# helm repo add nvidia https://nvidia.github.io/gpu-operator
+# helm repo update
+# 
+# helm install --wait --generate-name \
+#   -n gpu-operator --create-namespace \
+#   nvidia/gpu-operator \
+#   --set driver.enabled=true \
+#   --set toolkit.enabled=true \
+#   --set devicePlugin.enabled=true \
+#   --set nodeStatusExporter.enabled=true \
+#   --set gfd.enabled=true \
+#   --set migManager.enabled=false
+
+# Verification pod to test GPU access
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-test
+  namespace: default
+spec:
+  containers:
+  - name: gpu-test
+    image: nvidia/cuda:11.8-runtime-ubuntu20.04
+    command: ["nvidia-smi"]
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+  restartPolicy: Never
+---
+# Node selector example for GPU workloads
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-workload-example
+  namespace: default
+spec:
+  replicas: 0  # Set to 0 initially to save costs
+  selector:
+    matchLabels:
+      app: gpu-workload
+  template:
+    metadata:
+      labels:
+        app: gpu-workload
+    spec:
+      nodeSelector:
+        accelerator: nvidia-tesla-t4
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: gpu-container
+        image: nvidia/cuda:11.8-runtime-ubuntu20.04
+        command: ["sleep", "3600"]
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+          requests:
+            nvidia.com/gpu: 1

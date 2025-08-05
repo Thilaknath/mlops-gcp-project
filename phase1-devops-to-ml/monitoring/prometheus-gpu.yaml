@@ -1,0 +1,167 @@
+# Prometheus Configuration for GPU and ML Metrics
+# This includes DCGM Exporter for NVIDIA GPU metrics
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+# DCGM Exporter DaemonSet for GPU Metrics
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  template:
+    metadata:
+      labels:
+        app: dcgm-exporter
+    spec:
+      nodeSelector:
+        accelerator: nvidia-tesla-t4  # Only run on GPU nodes
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: dcgm-exporter
+        image: nvcr.io/nvidia/k8s/dcgm-exporter:3.1.8-3.1.5-ubuntu20.04
+        ports:
+        - name: metrics
+          containerPort: 9400
+        securityContext:
+          capabilities:
+            add: ["SYS_ADMIN"]
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      hostNetwork: true
+      hostPID: true
+---
+# Service for DCGM Exporter
+apiVersion: v1
+kind: Service
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+  labels:
+    app: dcgm-exporter
+spec:
+  ports:
+  - name: metrics
+    port: 9400
+    targetPort: 9400
+  selector:
+    app: dcgm-exporter
+---
+# ServiceMonitor for Prometheus to scrape DCGM metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+---
+# Prometheus configuration for ML metrics
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    
+    rule_files:
+      - "ml_rules.yml"
+    
+    scrape_configs:
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+    
+    - job_name: 'dcgm-exporter'
+      static_configs:
+      - targets: ['dcgm-exporter.monitoring.svc.cluster.local:9400']
+      scrape_interval: 30s
+    
+    - job_name: 'ray-clusters'
+      kubernetes_sd_configs:
+      - role: service
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_ray_io_cluster]
+        action: keep
+        regex: .+
+      - source_labels: [__meta_kubernetes_service_port_name]
+        action: keep
+        regex: dashboard
+  
+  ml_rules.yml: |
+    groups:
+    - name: gpu_alerts
+      rules:
+      - alert: GPUHighUtilization
+        expr: DCGM_FI_DEV_GPU_UTIL > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU utilization is high"
+          description: "GPU {{ $labels.gpu }} utilization is {{ $value }}%"
+      
+      - alert: GPUHighMemoryUsage
+        expr: (DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU memory usage is high"
+          description: "GPU {{ $labels.gpu }} memory usage is {{ $value }}%"
+    
+    - name: ray_alerts
+      rules:
+      - alert: RayClusterDown
+        expr: up{job="ray-clusters"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ray cluster is down"
+          description: "Ray cluster {{ $labels.instance }} has been down for more than 2 minutes"

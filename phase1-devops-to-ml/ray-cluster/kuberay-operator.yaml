@@ -1,0 +1,162 @@
+# KubeRay Operator Installation
+# This operator manages Ray clusters on Kubernetes
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ray-system
+---
+# Install KubeRay Operator using Helm:
+#
+# helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+# helm repo update
+#
+# helm install kuberay-operator kuberay/kuberay-operator \
+#   --namespace ray-system \
+#   --create-namespace \
+#   --version 1.0.0
+
+# Sample Ray Cluster Configuration
+apiVersion: ray.io/v1alpha1
+kind: RayCluster
+metadata:
+  name: sample-ray-cluster
+  namespace: default
+spec:
+  rayVersion: '2.8.0'
+  enableInTreeAutoscaling: true
+  autoscalerOptions:
+    upscalingMode: Default
+    idleTimeoutSeconds: 60
+    resources:
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+      block: 'true'
+    template:
+      spec:
+        containers:
+        - name: ray-head
+          image: rayproject/ray:2.8.0-py310
+          ports:
+          - containerPort: 6379
+            name: gcs
+          - containerPort: 8265
+            name: dashboard
+          - containerPort: 10001
+            name: client
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+          env:
+          - name: RAY_DISABLE_IMPORT_WARNING
+            value: "1"
+  workerGroupSpecs:
+  - replicas: 0  # Start with 0 workers to save costs
+    minReplicas: 0
+    maxReplicas: 3
+    groupName: worker-group
+    rayStartParams: {}
+    template:
+      spec:
+        containers:
+        - name: ray-worker
+          image: rayproject/ray:2.8.0-py310
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+          env:
+          - name: RAY_DISABLE_IMPORT_WARNING
+            value: "1"
+---
+# Ray Cluster with GPU Support (for later phases)
+apiVersion: ray.io/v1alpha1
+kind: RayCluster
+metadata:
+  name: gpu-ray-cluster
+  namespace: default
+spec:
+  rayVersion: '2.8.0'
+  enableInTreeAutoscaling: true
+  autoscalerOptions:
+    upscalingMode: Default
+    idleTimeoutSeconds: 60
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+      block: 'true'
+    template:
+      spec:
+        containers:
+        - name: ray-head
+          image: rayproject/ray:2.8.0-py310-gpu
+          ports:
+          - containerPort: 6379
+            name: gcs
+          - containerPort: 8265
+            name: dashboard
+          - containerPort: 10001
+            name: client
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+  workerGroupSpecs:
+  - replicas: 0  # Start with 0 workers
+    minReplicas: 0
+    maxReplicas: 2
+    groupName: gpu-worker-group
+    rayStartParams: {}
+    template:
+      spec:
+        nodeSelector:
+          accelerator: nvidia-tesla-t4
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        containers:
+        - name: ray-worker
+          image: rayproject/ray:2.8.0-py310-gpu
+          resources:
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+              nvidia.com/gpu: 1
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+              nvidia.com/gpu: 1
+---
+# Service to expose Ray Dashboard
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-dashboard
+  namespace: default
+spec:
+  selector:
+    ray.io/cluster: sample-ray-cluster
+    ray.io/node-type: head
+  ports:
+  - name: dashboard
+    port: 8265
+    targetPort: 8265
+  type: LoadBalancer
