@@ -14,7 +14,7 @@ metadata:
 # helm install kuberay-operator kuberay/kuberay-operator \
 #   --namespace ray-system \
 #   --create-namespace \
-#   --version 1.0.0
+#   --version 1.4.2
 
 # Sample Ray Cluster Configuration
 apiVersion: ray.io/v1alpha1
@@ -23,7 +23,7 @@ metadata:
   name: sample-ray-cluster
   namespace: default
 spec:
-  rayVersion: '2.8.0'
+  rayVersion: '2.48.0'
   enableInTreeAutoscaling: true
   autoscalerOptions:
     upscalingMode: Default
@@ -43,7 +43,7 @@ spec:
       spec:
         containers:
         - name: ray-head
-          image: rayproject/ray:2.8.0-py310
+          image: rayproject/ray:2.48.0-py310
           ports:
           - containerPort: 6379
             name: gcs
@@ -71,7 +71,7 @@ spec:
       spec:
         containers:
         - name: ray-worker
-          image: rayproject/ray:2.8.0-py310
+          image: rayproject/ray:2.48.0-py310
           resources:
             limits:
               cpu: "2"
@@ -90,7 +90,7 @@ metadata:
   name: gpu-ray-cluster
   namespace: default
 spec:
-  rayVersion: '2.8.0'
+  rayVersion: '2.48.0'
   enableInTreeAutoscaling: true
   autoscalerOptions:
     upscalingMode: Default
@@ -103,7 +103,7 @@ spec:
       spec:
         containers:
         - name: ray-head
-          image: rayproject/ray:2.8.0-py310-gpu
+          image: rayproject/ray:2.48.0-py310-gpu
           ports:
           - containerPort: 6379
             name: gcs
@@ -134,7 +134,7 @@ spec:
           effect: NoSchedule
         containers:
         - name: ray-worker
-          image: rayproject/ray:2.8.0-py310-gpu
+          image: rayproject/ray:2.48.0-py310-gpu
           resources:
             limits:
               cpu: "4"
